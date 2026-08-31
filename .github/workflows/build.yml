@@ -1,0 +1,77 @@
+name: POCO M4 5G - KernelSU Next
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          ref: light-u-oss
+          fetch-depth: 1
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            bc bison build-essential \
+            flex libssl-dev libelf-dev \
+            libncurses5-dev \
+            git curl zip unzip \
+            python3 rsync \
+            gcc-aarch64-linux-gnu \
+            clang lld llvm
+
+      - name: Integrate KernelSU Next
+        run: |
+          curl -LSs \
+            "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" \
+            | bash -s legacy
+
+      - name: Enable KernelSU Next
+        run: |
+          make ARCH=arm64 light_defconfig
+
+          ./scripts/config --file .config \
+            -e CONFIG_KPROBES \
+            -e CONFIG_KPROBE_EVENTS \
+            -e CONFIG_KSU_KPROBE_HOOKS \
+            -e CONFIG_KSU
+
+          make ARCH=arm64 olddefconfig
+
+          echo "KernelSU configuration:"
+          grep -E 'CONFIG_(KPROBES|KPROBE_EVENTS|KSU_KPROBE_HOOKS|KSU)=' .config
+
+      - name: Build kernel
+        run: |
+          make -j$(nproc) \
+            ARCH=arm64 \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            CC=clang \
+            LD=ld.lld \
+            AR=llvm-ar \
+            NM=llvm-nm \
+            OBJCOPY=llvm-objcopy \
+            OBJDUMP=llvm-objdump
+
+      - name: Show kernel output
+        run: |
+          find arch/arm64/boot -maxdepth 2 -type f \
+            \( -name "Image*" -o -name "*.dtb" \) -print
+
+      - name: Upload kernel artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: POCO-M4-5G-KernelSU-Next
+          path: |
+            arch/arm64/boot/Image
+            arch/arm64/boot/Image.gz
+            arch/arm64/boot/Image.gz-dtb
+            arch/arm64/boot/dts/**/*.dtb
